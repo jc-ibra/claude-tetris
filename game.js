@@ -14,9 +14,33 @@ const COLORS = [
   '#90caf9', // J - pale blue
   '#ffb74d', // L - orange
   '#9e9e9e', // N - tuerca (gris metal)
+  '#ff7043', // power-up: bomba
+  '#ffee58', // power-up: rayo
+  '#ab47bc', // power-up: tinte
+  '#26c6da', // power-up: gravedad
+  '#80d8ff', // power-up: congelar
 ];
 
 const NUT = 8;
+
+const POWERUPS = [
+  { code: 9,  key: 'bomb',    name: 'BOMBA',    icon: '💣' },
+  { code: 10, key: 'bolt',    name: 'RAYO',     icon: '⚡' },
+  { code: 11, key: 'dye',     name: 'TINTE',    icon: '🎨' },
+  { code: 12, key: 'gravity', name: 'GRAVEDAD', icon: '⬇️' },
+  { code: 13, key: 'freeze',  name: 'CONGELAR', icon: '❄️' },
+];
+const POWERUP_BY_CODE = new Map(POWERUPS.map(p => [p.code, p]));
+const FREEZE_DURATION = 5000; // ms
+const LINES_PER_POWERUP = 5;
+
+function isPowerUp(type) {
+  return type >= 9;
+}
+
+function powerUpOf(type) {
+  return POWERUP_BY_CODE.get(type);
+}
 
 const PIECES = [
   null,
@@ -28,6 +52,11 @@ const PIECES = [
   [[6,0,0],[6,6,6],[0,0,0]],                  // J
   [[0,0,7],[7,7,7],[0,0,0]],                  // L
   [[8,8,8],[8,0,8],[8,8,8]],                  // N - tuerca (anillo 3x3 con hueco central)
+  [[9]],   // power-up: bomba
+  [[10]],  // power-up: rayo
+  [[11]],  // power-up: tinte
+  [[12]],  // power-up: gravedad
+  [[13]],  // power-up: congelar
 ];
 
 const LINE_SCORES = [0, 100, 300, 500, 800];
@@ -44,8 +73,10 @@ const overlayTitle = document.getElementById('overlay-title');
 const overlayScore = document.getElementById('overlay-score');
 const restartBtn = document.getElementById('restart-btn');
 const themeToggle = document.getElementById('theme-toggle');
+const powerUpEl = document.getElementById('powerup');
 
 let board, current, next, score, lines, level, paused, gameOver, lastTime, dropAccum, dropInterval, animId;
+let linesSincePowerUp, pendingPowerUp, freezeRemaining, activePowerUpName;
 
 function createBoard() {
   return Array.from({ length: ROWS }, () => new Array(COLS).fill(0));
@@ -55,6 +86,12 @@ function randomPiece() {
   const type = Math.floor(Math.random() * 8) + 1;
   const shape = PIECES[type].map(row => [...row]);
   return { type, shape, x: Math.floor(COLS / 2) - Math.floor(shape[0].length / 2), y: 0 };
+}
+
+function randomPowerUpPiece() {
+  const powerUp = POWERUPS[Math.floor(Math.random() * POWERUPS.length)];
+  const shape = PIECES[powerUp.code].map(row => [...row]);
+  return { type: powerUp.code, shape, x: Math.floor(COLS / 2), y: 0 };
 }
 
 function collide(shape, ox, oy) {
@@ -113,8 +150,89 @@ function clearLines() {
     score += (LINE_SCORES[cleared] || 0) * level;
     level = Math.floor(lines / 10) + 1;
     dropInterval = Math.max(100, 1000 - (level - 1) * 90);
+    linesSincePowerUp += cleared;
+    if (linesSincePowerUp >= LINES_PER_POWERUP) {
+      linesSincePowerUp -= LINES_PER_POWERUP;
+      pendingPowerUp = true;
+    }
     updateHUD();
   }
+}
+
+function applyGravity() {
+  for (let c = 0; c < COLS; c++) {
+    const values = [];
+    for (let r = 0; r < ROWS; r++) {
+      if (board[r][c]) values.push(board[r][c]);
+    }
+    for (let r = ROWS - 1; r >= 0; r--) {
+      board[r][c] = values.length ? values.pop() : 0;
+    }
+  }
+}
+
+function clearCells(cells) {
+  let cleared = 0;
+  for (const [r, c] of cells) {
+    if (r < 0 || r >= ROWS || c < 0 || c >= COLS) continue;
+    if (board[r][c]) {
+      board[r][c] = 0;
+      cleared++;
+    }
+  }
+  if (cleared) score += cleared * 10 * level;
+  return cleared;
+}
+
+function applyPowerUp(type, x, y) {
+  const powerUp = powerUpOf(type);
+  if (!powerUp) return;
+  switch (powerUp.key) {
+    case 'bomb': {
+      const cells = [];
+      for (let r = y - 1; r <= y + 1; r++)
+        for (let c = x - 1; c <= x + 1; c++)
+          cells.push([r, c]);
+      clearCells(cells);
+      applyGravity();
+      break;
+    }
+    case 'bolt': {
+      const cells = [];
+      for (let c = 0; c < COLS; c++) cells.push([y, c]);
+      for (let r = 0; r < ROWS; r++) cells.push([r, x]);
+      clearCells(cells);
+      applyGravity();
+      break;
+    }
+    case 'dye': {
+      const counts = new Array(9).fill(0);
+      for (let r = 0; r < ROWS; r++)
+        for (let c = 0; c < COLS; c++)
+          if (board[r][c]) counts[board[r][c]]++;
+      let target = 0, best = 0;
+      for (let v = 1; v <= 8; v++) {
+        if (counts[v] > best) { best = counts[v]; target = v; }
+      }
+      if (target) {
+        const cells = [];
+        for (let r = 0; r < ROWS; r++)
+          for (let c = 0; c < COLS; c++)
+            if (board[r][c] === target) cells.push([r, c]);
+        clearCells(cells);
+        applyGravity();
+      }
+      break;
+    }
+    case 'gravity':
+      applyGravity();
+      break;
+    case 'freeze':
+      freezeRemaining = FREEZE_DURATION;
+      break;
+  }
+  activePowerUpName = powerUp.name;
+  updateHUD();
 }
 
 function ghostY() {
@@ -141,14 +259,23 @@ function softDrop() {
 }
 
 function lockPiece() {
-  merge();
+  if (isPowerUp(current.type)) {
+    applyPowerUp(current.type, current.x, Math.max(0, current.y));
+  } else {
+    merge();
+  }
   clearLines();
   spawn();
 }
 
 function spawn() {
   current = next;
-  next = randomPiece();
+  if (pendingPowerUp) {
+    pendingPowerUp = false;
+    next = randomPowerUpPiece();
+  } else {
+    next = randomPiece();
+  }
   if (collide(current.shape, current.x, current.y)) {
     endGame();
   }
@@ -159,6 +286,11 @@ function updateHUD() {
   scoreEl.textContent = score.toLocaleString();
   linesEl.textContent = lines;
   levelEl.textContent = level;
+  if (freezeRemaining > 0) {
+    powerUpEl.textContent = `❄️ ${(freezeRemaining / 1000).toFixed(1)}s`;
+  } else {
+    powerUpEl.textContent = activePowerUpName ?? '—';
+  }
 }
 
 function drawBlock(context, x, y, colorIndex, size, alpha) {
@@ -180,6 +312,17 @@ function drawNutHole(context, x, y, size, alpha) {
   context.beginPath();
   context.arc(x * size + size / 2, y * size + size / 2, size * 0.3, 0, Math.PI * 2);
   context.stroke();
+  context.globalAlpha = 1;
+}
+
+function drawPowerUpIcon(context, x, y, type, size, alpha) {
+  const powerUp = powerUpOf(type);
+  if (!powerUp) return;
+  context.globalAlpha = alpha ?? 1;
+  context.font = `${size * 0.6}px serif`;
+  context.textAlign = 'center';
+  context.textBaseline = 'middle';
+  context.fillText(powerUp.icon, x * size + size / 2, y * size + size / 2 + 1);
   context.globalAlpha = 1;
 }
 
@@ -218,12 +361,14 @@ function draw() {
       if (current.shape[r][c])
         drawBlock(ctx, current.x + c, gy + r, current.shape[r][c], BLOCK, 0.2);
   if (current.type === NUT) drawNutHole(ctx, current.x + 1, gy + 1, BLOCK, 0.2);
+  if (isPowerUp(current.type)) drawPowerUpIcon(ctx, current.x, gy, current.type, BLOCK, 0.2);
 
   // current piece
   for (let r = 0; r < current.shape.length; r++)
     for (let c = 0; c < current.shape[r].length; c++)
       drawBlock(ctx, current.x + c, current.y + r, current.shape[r][c], BLOCK);
   if (current.type === NUT) drawNutHole(ctx, current.x + 1, current.y + 1, BLOCK);
+  if (isPowerUp(current.type)) drawPowerUpIcon(ctx, current.x, current.y, current.type, BLOCK);
 }
 
 function drawNext() {
@@ -236,6 +381,7 @@ function drawNext() {
     for (let c = 0; c < shape[r].length; c++)
       drawBlock(nextCtx, offX + c, offY + r, shape[r][c], NB);
   if (next.type === NUT) drawNutHole(nextCtx, offX + 1, offY + 1, NB);
+  if (isPowerUp(next.type)) drawPowerUpIcon(nextCtx, offX, offY, next.type, NB);
 }
 
 function endGame() {
@@ -265,13 +411,18 @@ function loop(ts) {
   if (gameOver || paused) return;
   const dt = ts - lastTime;
   lastTime = ts;
-  dropAccum += dt;
-  if (dropAccum >= dropInterval) {
-    dropAccum = 0;
-    if (!collide(current.shape, current.x, current.y + 1)) {
-      current.y++;
-    } else {
-      lockPiece();
+  if (freezeRemaining > 0) {
+    freezeRemaining = Math.max(0, freezeRemaining - dt);
+    updateHUD();
+  } else {
+    dropAccum += dt;
+    if (dropAccum >= dropInterval) {
+      dropAccum = 0;
+      if (!collide(current.shape, current.x, current.y + 1)) {
+        current.y++;
+      } else {
+        lockPiece();
+      }
     }
   }
   draw();
@@ -289,6 +440,10 @@ function init() {
   dropInterval = 1000;
   dropAccum = 0;
   lastTime = performance.now();
+  linesSincePowerUp = 0;
+  pendingPowerUp = false;
+  freezeRemaining = 0;
+  activePowerUpName = null;
   next = randomPiece();
   spawn();
   updateHUD();
