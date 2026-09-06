@@ -1,0 +1,120 @@
+name: Claude Issue Triage
+
+on:
+  issues:
+    types: [opened]
+
+jobs:
+  triage:
+    # Evita duplicar trabajo con claude.yml, que también se dispara en
+    # issues:opened cuando el título/cuerpo menciona @claude.
+    if: |
+      !contains(github.event.issue.body, '@claude') &&
+      !contains(github.event.issue.title, '@claude')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+      id-token: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      - name: Triage issue with Claude
+        id: claude-triage
+        uses: anthropics/claude-code-action@v1
+        with:
+          claude_code_oauth_token: ${{ secrets.CLAUDE_CODE_OAUTH_TOKEN }}
+          claude_args: '--allowedTools "Bash(gh issue view:*),Bash(gh issue edit:*),Bash(gh issue comment:*),Bash(gh label list:*),Bash(gh label create:*),Read,Grep,Glob"'
+          prompt: |
+            Estás haciendo triage automático del issue #${{ github.event.issue.number }}
+            en el repositorio ${{ github.repository }} de un juego de Tetris en
+            vanilla JS (ver CLAUDE.md en la raíz del repo para la arquitectura).
+
+            NO modifiques código, no crees ramas ni pull requests. Tu única salida
+            es: (1) aplicar labels al issue y (2) publicar un comentario de
+            diagnóstico. Nada más.
+
+            ## Paso 1 — Leer el issue
+            Ejecuta: gh issue view ${{ github.event.issue.number }} --json title,body,author
+
+            ## Paso 2 — Investigar el código relevante
+            Lee CLAUDE.md para entender la arquitectura (todo vive en game.js:
+            modelo de tablero, PIECES, rotateCW, collide, tryRotate con wall
+            kicks, loop, lockPiece/merge/clearLines/spawn, scoring, draw/ghostY,
+            drawNext). Usa Read/Grep sobre game.js, index.html y style.css para
+            localizar las funciones y líneas exactas relacionadas con lo que
+            reporta o pide el issue.
+
+            ## Paso 3 — Etiquetar
+            Catálogo FIJO de labels — usa exclusivamente estos, no inventes
+            nombres nuevos. Antes de asignarlos, crea con `gh label create
+            <nombre> --color <hex> --description "<desc>" --force` cualquiera
+            que no exista todavía en el repo (--force lo hace idempotente):
+
+            Tipo (elige exactamente 1):
+              - bug (ya existe)
+              - enhancement (ya existe)
+              - documentation (ya existe)
+              - question (ya existe)
+
+            Área (0 o más, según lo que toque el issue):
+              - area:gameplay   #5319e7  "Colisión, rotación, wall kicks, line clears, spawn"
+              - area:rendering  #1d76db  "Canvas, draw(), ghost piece, preview de siguiente pieza"
+              - area:controls   #0e8a16  "Teclado, pausa"
+              - area:scoring    #fbca04  "Puntaje, nivel, velocidad de caída"
+              - area:ui         #c5def5  "HTML/CSS, HUD, overlay de pausa/game over"
+
+            Prioridad (elige exactamente 1):
+              - priority:high    #b60205  "Bloquea el juego o rompe una mecánica core"
+              - priority:medium  #d93f0b  "Afecta la experiencia pero hay workaround"
+              - priority:low     #0e8a16  "Cosmético o de bajo impacto"
+
+            Extra (opcional, ya existen, úsalos solo si aplican de verdad):
+              - accessibility, good first issue, duplicate, invalid
+
+            Aplica los labels elegidos con:
+              gh issue edit ${{ github.event.issue.number }} --add-label "..."
+
+            Si el issue es demasiado vago para diagnosticar con confianza, no
+            inventes un diagnóstico: aplica "question" + "priority:low" y pide
+            en el comentario la información que falta.
+
+            ## Paso 4 — Comentario de diagnóstico
+            Escribe el comentario a un archivo temporal y publícalo con
+            `gh issue comment ${{ github.event.issue.number }} --body-file <archivo>`.
+            Publica UN SOLO comentario, en español, con menos de ~400 palabras,
+            siguiendo esta plantilla:
+
+            ## 🔍 Análisis automático
+
+            **Clasificación:** <tipo> · <áreas o "ninguna"> · <prioridad>
+
+            ### Resumen del problema
+            <1-2 frases reformulando qué reporta o pide el issue>
+
+            ### Diagnóstico técnico
+            <causa probable o alcance de la feature, citando funciones concretas
+            de game.js (collide, tryRotate, clearLines, lockPiece, spawn, draw,
+            ghostY, updateHUD, etc.) cuando aplique>
+
+            ### Archivos y funciones afectados
+            - `game.js:<línea>` — `<función>` — <qué habría que cambiar>
+            (lista los que encontraste; si no encontraste ninguno, dilo)
+
+            ### Enfoque sugerido
+            1. <paso>
+            2. <paso>
+
+            ### Verificación
+            <cómo comprobarlo: no hay tooling de test/build, se abre index.html
+            (o se sirve con un servidor local) y se juega manualmente>
+
+            ### Preguntas abiertas
+            <solo incluir esta sección si el issue es ambiguo>
+
+            ---
+            🤖 Triage automático. Comenta `@claude` en este issue para pedir que
+            implemente la solución.
