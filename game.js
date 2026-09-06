@@ -139,8 +139,7 @@ function saveHighScores(data) {
   }
 }
 
-function renderHighScores(listEl, comboEl, linesEl, highlightEntry) {
-  const data = loadHighScores();
+function renderHighScoresView(data, listEl, comboEl, maxLinesEl, highlightEntry) {
   listEl.innerHTML = '';
   if (data.scores.length === 0) {
     const li = document.createElement('li');
@@ -164,13 +163,15 @@ function renderHighScores(listEl, comboEl, linesEl, highlightEntry) {
     });
   }
   if (comboEl) comboEl.textContent = data.bestCombo;
-  if (linesEl) linesEl.textContent = data.maxLines;
-  return data;
+  if (maxLinesEl) maxLinesEl.textContent = data.maxLines;
 }
 
 function refreshAllHighScoreViews(highlightEntry) {
-  renderHighScores(overlayHighscoresList, overlayBestComboEl, overlayMaxLinesEl, highlightEntry ?? null);
-  renderHighScores(startHighscoresList, startBestComboEl, startMaxLinesEl, highlightEntry ?? null);
+  // Una sola lectura de localStorage; ambas vistas (start screen y overlay) se
+  // pintan a partir de los mismos datos para evitar parsear el JSON dos veces.
+  const data = loadHighScores();
+  renderHighScoresView(data, overlayHighscoresList, overlayBestComboEl, overlayMaxLinesEl, highlightEntry ?? null);
+  renderHighScoresView(data, startHighscoresList, startBestComboEl, startMaxLinesEl, highlightEntry ?? null);
 }
 
 function resetHighScores() {
