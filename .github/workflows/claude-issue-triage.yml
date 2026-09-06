@@ -86,9 +86,10 @@ jobs:
             Escribe el comentario a un archivo temporal y publícalo con
             `gh issue comment ${{ github.event.issue.number }} --body-file <archivo>`.
             Publica UN SOLO comentario, en español, con menos de ~400 palabras,
+            sin usar emojis en ningún punto del comentario ni en los labels,
             siguiendo esta plantilla:
 
-            ## 🔍 Análisis automático
+            ## Análisis automático
 
             **Clasificación:** <tipo> · <áreas o "ninguna"> · <prioridad>
 
@@ -116,5 +117,5 @@ jobs:
             <solo incluir esta sección si el issue es ambiguo>
 
             ---
-            🤖 Triage automático. Comenta `@claude` en este issue para pedir que
+            Triage automático. Comenta `@claude` en este issue para pedir que
             implemente la solución.
